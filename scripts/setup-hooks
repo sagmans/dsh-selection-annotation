@@ -1,0 +1,4 @@
+#!/bin/sh
+# Keep clone setup independent of package installation and Git configuration writes.
+set -eu
+exec node "$(dirname -- "$0")/setup-hooks.mjs" "$@"

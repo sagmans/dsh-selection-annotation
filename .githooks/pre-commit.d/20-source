@@ -1,0 +1,8 @@
+#!/bin/sh
+# Validate the exact index so partial commits cannot hide invalid source.
+set -eu
+# shellcheck source-path=SCRIPTDIR source=../lib/helpers.sh
+. "${HOOK_HELPERS:?run from installed hooks}"
+CHECK_TIMEOUT_SECONDS=120
+staged_git diff --cached --check
+run_step 'staged source format and lint' "$CHECK_TIMEOUT_SECONDS" node scripts/check.mjs staged

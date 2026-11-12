@@ -1,0 +1,45 @@
+{
+  "name": "@local/selection-annotation",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Reply to selected text in an agent response and carry every annotation into the next message.",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sagmans/dsh-selection-annotation.git"
+  },
+  "homepage": "https://github.com/sagmans/dsh-selection-annotation#readme",
+  "bugs": {
+    "url": "https://github.com/sagmans/dsh-selection-annotation/issues"
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "smoke": "node scripts/check.mjs smoke"
+  }
+}

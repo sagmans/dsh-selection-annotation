@@ -1,0 +1,8 @@
+# Local installs and release archives are not source artifacts.
+node_modules/
+*.tgz
+*.log
+.DS_Store
+# Credentials must remain outside the distribution and repository.
+.env
+.env.*

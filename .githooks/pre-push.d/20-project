@@ -1,0 +1,17 @@
+#!/bin/sh
+# Full validation belongs to each distinct pushed tip, not each intermediate commit.
+set -eu
+# shellcheck source-path=SCRIPTDIR source=../lib/helpers.sh
+. "${HOOK_HELPERS:?run from installed hooks}"
+CHECK_TIMEOUT_SECONDS=180
+pushed_shas <"${HOOK_STDIN_FILE:?missing push refs}" >/dev/null || exit 1
+tips=''
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+	[ -n "$local_sha" ] || continue
+	is_null_oid "$local_sha" && continue
+	case " $tips " in *" $local_sha "*) continue ;; esac
+	tips="$tips $local_sha"
+done <"$HOOK_STDIN_FILE"
+for tip in $tips; do
+	at_sha "$tip" run_step 'full source distribution and smoke checks' "$CHECK_TIMEOUT_SECONDS" node scripts/check.mjs || exit 1
+done
