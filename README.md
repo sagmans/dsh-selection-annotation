@@ -31,32 +31,10 @@ The user's own text follows the fence. The Agent receives the exact block plus
 the text; the transcript hides the fence and renders the same data as quote
 cards above the message.
 
-## Implementation
-
-| Layer                                     | Role                                                                                                                              |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `client.js` `shell.overlay`               | Reads the assistant-step selection and renders the reply popup. Attaching adds a card; it never writes the draft.                 |
-| `client.js` `conversation.input.dock`     | Renders the immutable cards, composes the fence immediately before the composer submits, and clears cards after a committed send. |
-| `client.js` `conversation.user.text.node` | Parses the fence from sent text and renders quote cards in the transcript and a one-line summary in queue previews.               |
-| `index.js`                                | Empty Host half; the bundle only needs a profile row.                                                                             |
-
-Selection boundaries must both resolve to the same
-`[data-chat-flow-kind="assistant-step"]` node. Reasoning parts, hidden process
-rows, and the composer are excluded.
-
-Submit composition listens for Enter inside `[data-composer-input]` and clicks
-on the localized send/queue/steer button. It uses `captureInsertion` and
-revision-guarded `insertText` to add a plain prefix without rebuilding semantic
-file/session chips or quote nodes. Cancellation, draft edits, and rejection
-retire the attempt and remove only an unchanged owned prefix. Unsent cards stay
-available. A successful send clears only the card IDs captured for that attempt;
-cards attached while it waits remain for the next message. Selecting an editable
-command cancels an unsent attempt; it does not acknowledge a send.
-
 ## Limits
 
-- One fence can carry at most 20 annotations; each quote is capped at 4000
-  characters.
+- Annotation counts and quote clipping are bounded by the
+  [browser source](client.js). Shortened quotes include a trailing ellipsis.
 - Only chat transcript text is annotatable; user messages and tool cards are
   not.
 - The fence must start the message. Editing a queued message restores the raw
@@ -72,24 +50,11 @@ manager. Keep the checkout in place: a local directory installation links to
 this source. The package name stays unchanged so an existing profile can keep
 its registration.
 
-## Development
+## Contribute
 
-After cloning, run `scripts/setup-hooks`. This installs the repository's hooks
-without changing Git configuration. It refuses to replace custom hooks.
-
-```sh
-scripts/setup-hooks
-node scripts/check.mjs
-node scripts/check.mjs smoke
-```
-
-Install Gitleaks, markdownlint-cli2, Semgrep, Lizard, and OSV Scanner before
-contributing. Missing tools and failed checks block the relevant hook. Commits
-must be signed, signed off, and use a Conventional Commit subject with a purpose
-body. Never bypass hooks with `--no-verify`.
-
-The native gate checks source syntax and hygiene, package and locale shape,
-privacy patterns, distribution exports, and module registration. Generic push
-checks also scan signatures, secrets, dependencies, source security, and
-function complexity. Exercise the installed plugin in a local Web UI before
-delivery; module registration alone does not prove its visible behavior.
+For setup, checks, and local hooks, read the
+[development guide](https://github.com/sagmans/dsh-selection-annotation/blob/main/docs/DEVELOPMENT.md).
+For draft ownership and send recovery, read the
+[architecture guide](https://github.com/sagmans/dsh-selection-annotation/blob/main/docs/ARCHITECTURE.md).
+For local storage, sent content, and distribution boundaries, read the
+[security guide](https://github.com/sagmans/dsh-selection-annotation/blob/main/docs/SECURITY.md).

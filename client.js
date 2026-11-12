@@ -1,72 +1,42 @@
 /**
- * Selection annotations for the Web conversation.
- *
- * A user selects text inside an assistant reply, gets a small reply popup near
- * the selection, and presses Enter. The reply becomes an immutable annotation
- * card above the composer. On the next send, the cards are serialized into a
- * fenced block at the front of the user message, so the agent receives the
- * quoted passage and the replies, while the transcript renders the same block
- * as quoted cards with the user's own message below them.
- *
- * Design constraints:
- * - Cards are the source of truth while composing. They are never written as
- *   editable draft text; only the submit instant composes the fenced payload.
- * - The serialized block is plain JSON in a marked fence, so the model reads a
- *   stable shape and the user-text rule can rebuild the cards after reload.
- * - The browser half only observes a finished selection in an assistant step;
- *   it never inspects host components or other plugins.
+ * Cards stay separate from the draft so editable text cannot diverge from them.
+ * Submit-time prefix edits preserve semantic nodes. The sent fence keeps quotes
+ * available without browser storage, while the renderer changes only appearance.
  */
 // Combo scripts share a realm; lexical bindings also keep hot reloads isolated.
 {
-  /** Locale namespace owned by this package. */
+  /** Keep translation ownership separate from the conversation dictionary. */
   const NS = 'selection-annotation';
-  /** Slot entry id shared by the dock and the overlay; one plugin, one identity. */
+  /** A shared identity lets the dock and overlay belong to one plugin. */
   const ENTRY_ID = 'selection-annotation';
-  /** Composer dock slot above the composer card; owns the annotation cards. */
   const DOCK_SLOT = 'conversation.input.dock';
-  /** Frame-wide floating slot that hosts the reply popup above every column. */
   const OVERLAY_SLOT = 'shell.overlay';
-  /** Sent user-text renderer slot keyed by the annotation node id. */
   const USER_TEXT_SLOT = 'conversation.user.text.node';
-  /** Keyed user-text node id contributed for the annotation fence. */
   const USER_TEXT_NODE_ID = 'selection-annotation';
-  /** Chat flow node kind that carries an assistant response body. */
   const ASSISTANT_STEP_SELECTOR = '[data-chat-flow-kind="assistant-step"]';
-  /** Group-part marker that separates reasoning steps from the visible answer. */
   const GROUP_PART_ATTRIBUTE = 'data-chat-group-part';
   /** Reasoning is not answer text, so it is not annotatable. */
   const REASONING_PART = 'reasoning';
-  /** Conversation region that owns the transcript; the composer has its own. */
   const CHAT_REGION_SELECTOR = '[data-conversation-region="chat"]';
-  /** Composer region, excluded so composer text never opens the popup. */
+  /** Composer text must not become an answer annotation. */
   const COMPOSER_REGION_SELECTOR = '[data-conversation-region="composer"]';
-  /** Composer editor root; Enter rewrites only fire inside it. */
   const COMPOSER_INPUT_SELECTOR = '[data-composer-input]';
-  /** Attribute carrying the mounted session id around a Conversation. */
   const CONVERSATION_SESSION_ATTRIBUTE = 'data-conversation-session';
-  /** Attribute marking the popup root for pointer hit-testing. */
   const POPUP_ATTRIBUTE = 'data-selection-annotation';
-  /** Attribute marking the card dock for diagnostics and styling. */
   const DOCK_ATTRIBUTE = 'data-selection-annotation-dock';
-  /** Fence language that marks the model-visible annotation payload. */
   const FENCE_LANGUAGE = 'dsh-annotations';
-  /** Opening fence line, newline included: the payload starts on the next line. */
   const FENCE_OPEN = `\`\`\`${FENCE_LANGUAGE}\n`;
-  /** Closing fence, newline first so the JSON payload stays on its own line. */
   const FENCE_CLOSE = '\n```';
-  /** Payload schema version; readers ignore anything else. */
+  /** Unknown schemas remain raw text rather than misleading rich cards. */
   const FENCE_VERSION = 1;
-  /** Longest excerpt quoted for one annotation; protects context from over-selection. */
+  /** Bound excerpts so an oversized selection cannot dominate the message. */
   const MAX_QUOTE_CHARS = 4000;
-  /** Longest comment accepted by the popup. */
+  /** Bound replies at both popup input and sent-fence parsing. */
   const MAX_COMMENT_CHARS = 4000;
   /** Bound on pending cards so the dock and the payload stay manageable. */
   const MAX_ANNOTATIONS = 20;
-  /** Popup width in CSS pixels; clamping keeps it inside the viewport. */
   const POPUP_WIDTH = 344;
-  /** Gap between the selection and the popup. */
   const POPUP_GAP = 10;
-  /** Viewport margin kept clear by the popup. */
   const VIEWPORT_MARGIN = 12;
   /** Grace period before an unsubmitted composed draft is rolled back. */
   const COMPOSE_WATCHDOG_MS = 2000;
@@ -74,12 +44,11 @@
   const EDITABLE_PLAIN_PHASE = 'plain';
   /** Editable command claims are not proof that the Host received a submission. */
   const SUBMISSION_PHASES = new Set(['sending', 'adjudicating', 'submitting']);
-  /** Browser-storage key prefix for per-session annotation cards. */
   const STORAGE_PREFIX = 'dsh-selection-annotation:v1:';
-  /** Composer labels that identify the localized send/steer button. */
+  /** Localized labels keep send detection independent of the selected language. */
   const SEND_LABEL_KEYS = ['input.send', 'input.send.queue', 'input.send.steer'];
 
-  /** English strings; keys stay flat so every surface can bind the same dictionary. */
+  /** Flat keys let all surfaces share one locale dictionary. */
   const EN = {
     'popup.aria': 'Replying to selected text',
     'popup.placeholder': 'Reply to this text…',
@@ -96,7 +65,6 @@
     'error.noSession': 'Open a session before adding an annotation.',
     'error.tooMany': 'You can attach at most {count} annotations to one message.',
   };
-  /** Chinese strings kept beside the English ones for the same keys. */
   const ZH = {
     'popup.aria': '回复所选文本',
     'popup.placeholder': '回复这段文本…',
@@ -114,17 +82,13 @@
     'error.tooMany': '一条消息最多附加 {count} 条批注。',
   };
 
-  /** Resolve the element that owns a selection boundary node. */
+  /** Selection boundaries can be text nodes, but region checks need elements. */
   const elementOf = function elementOf(node) {
     if (!node) return null;
     return node.nodeType === 1 ? node : node.parentElement;
   };
 
-  /**
-   * Map one selection boundary to the assistant step that renders it.
-   * Rejects reasoning, hidden process rows, and anything inside the composer,
-   * so only answer prose and code become annotatable.
-   */
+  /** Exclude reasoning and hidden rows so a quote represents visible answer content. */
   const resolveAssistantStep = function resolveAssistantStep(node) {
     const element = elementOf(node);
     if (!element || typeof element.closest !== 'function') return null;
@@ -137,7 +101,7 @@
     return step;
   };
 
-  /** Collapse selection noise into a compact, context-safe excerpt. */
+  /** Normalize browser selection artifacts without flattening paragraph boundaries. */
   const normalizeExcerpt = function normalizeExcerpt(value) {
     let text = String(value).replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ');
     text = text
@@ -152,7 +116,7 @@
     return text;
   };
 
-  /** Read the live browser selection when both ends belong to the same assistant step. */
+  /** One assistant step must own both boundaries to avoid quotes across unrelated replies. */
   const readSelection = function readSelection() {
     const selection = document.getSelection();
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
@@ -176,7 +140,7 @@
     };
   };
 
-  /** Whether a pointer target is part of the popup, which must not close or reopen it. */
+  /** Popup interaction must not dismiss or reopen its own selection. */
   const isPopupNode = function isPopupNode(node) {
     const element = elementOf(node);
     return Boolean(element && element.closest(`[${POPUP_ATTRIBUTE}]`));
@@ -188,7 +152,7 @@
     if (selection) selection.removeAllRanges();
   };
 
-  /** One random id for a card; crypto is available in the secure Web context. */
+  /** Stable card IDs distinguish submitted cards from cards added during the wait. */
   const createAnnotationId = function createAnnotationId() {
     try {
       return globalThis.crypto.randomUUID();
@@ -198,7 +162,7 @@
     }
   };
 
-  /** Build the fenced payload that precedes the user's own message text. */
+  /** The wire payload omits local IDs because only the composer needs acknowledgement ownership. */
   const buildAnnotatedMessage = function buildAnnotatedMessage(userText, annotations) {
     const payload = {
       v: FENCE_VERSION,
@@ -212,7 +176,7 @@
     return extra.trim() === '' ? fence : `${fence}\n\n${extra}`;
   };
 
-  /** Validate and normalize the payload embedded in a fence. */
+  /** Malformed or unknown payloads must remain text instead of partial rich cards. */
   const parseFencePayload = function parseFencePayload(raw) {
     let payload;
     try {
@@ -233,7 +197,7 @@
     return annotations;
   };
 
-  /** Parse a fence that starts exactly at offset zero; messages composed by this plugin do. */
+  /** Only a leading fence is owned here; quoted examples inside a message stay untouched. */
   const parseFenceAtStart = function parseFenceAtStart(text) {
     if (typeof text !== 'string' || !text.startsWith(FENCE_OPEN)) return undefined;
     const close = text.indexOf(FENCE_CLOSE, FENCE_OPEN.length);
@@ -253,7 +217,7 @@
     }
   };
 
-  /** Per-session immutable annotation cards, persisted so a reload keeps them. */
+  /** Immutable session snapshots keep UI subscribers consistent across local edits and reloads. */
   const createAnnotationStore = function createAnnotationStore(storage) {
     const sessions = new Map();
     const listeners = new Set();
@@ -265,6 +229,7 @@
       if (sessions.has(sessionId)) return sessions.get(sessionId);
       let items = [];
       try {
+        // Each tab caches its first read; storage is reload durability, not a cross-tab bus.
         const raw = storage ? storage.getItem(keyFor(sessionId)) : null;
         if (raw) {
           const parsed = JSON.parse(raw);
@@ -289,6 +254,7 @@
       return frozen;
     };
     const write = (sessionId, items) => {
+      // Persistence failure must not undo a card that is already visible in this tab.
       sessions.set(sessionId, items);
       try {
         if (!storage) return;
@@ -331,10 +297,7 @@
     };
   };
 
-  /**
-   * Per-session bridge registry. The session-scoped dock publishes the current
-   * composer face; the root overlay consumes it to attach cards.
-   */
+  /** The root overlay needs the active dock's session without owning composer internals. */
   const createBridgeStore = function createBridgeStore() {
     let current = null;
     const listeners = new Set();
@@ -362,7 +325,7 @@
     };
   };
 
-  /** One immutable quoted card shared by the composer dock and the transcript. */
+  /** Shared card markup keeps pending and sent quotes consistent without editable copies. */
   const annotationCard = function annotationCard(React, annotation, key, t, onRemove) {
     const h = React.createElement;
     return h(
@@ -451,7 +414,7 @@
     const { inputRef, actionsRef, pendingRef, watchdogRef } = refs;
     const hasOpenMenu = () => document.querySelector(`${COMPOSER_REGION_SELECTOR} [role="listbox"]`) !== null;
 
-    /** Compose the fence into the draft immediately before the composer's own submit. */
+    /** Leave command claims and menus to the composer so annotation insertion cannot change their meaning. */
     const composeForSubmit = useCallback(() => {
       const state = inputRef.current;
       const actions = actionsRef.current;
@@ -477,7 +440,7 @@
     return composeForSubmit;
   };
 
-  /** Capture submission gestures before the host reads the draft. */
+  /** Capture phase puts the prefix in place before the composer reads the draft. */
   const useSubmitListeners = function useSubmitListeners(React, composeForSubmit, conversationT, watchdogRef) {
     const { useEffect } = React;
     useEffect(() => {
@@ -516,6 +479,7 @@
       const pending = pendingRef.current;
       if (!pending || !input) return;
       if (input.phase !== EDITABLE_PLAIN_PHASE) {
+        // Editable commands are not transactions, even though both leave the plain phase.
         if (SUBMISSION_PHASES.has(input.phase)) pending.sawBusy = true;
         else retireSubmissionAttempt(refs, input, pending);
         return;
@@ -541,7 +505,7 @@
     }, [annotations, annotationSessionId, input]);
   };
 
-  /** Keep the original hook order and per-mounted-dock refs across renders. */
+  /** Live refs let submit listeners use the latest draft without stale render captures. */
   const useAnnotationDock = function useAnnotationDock(deps, props) {
     const { annotations, bridge, t, conversationT, React } = deps;
     const { useRef, useState, useEffect } = React;
@@ -783,7 +747,7 @@
     );
   };
 
-  /** Keep state and hooks in their original order for the mounted overlay. */
+  /** Overlay-local state prevents popup edits from becoming composer draft state. */
   const useSelectionOverlay = function useSelectionOverlay(deps) {
     const { React, bridge } = deps;
     const { Fragment, useState, useRef, useCallback, useEffect } = React;
@@ -833,7 +797,7 @@
     );
   };
 
-  /** Sent user-text node: quoted cards above the user's own message. */
+  /** The renderer consumes parsed data so transcript display does not depend on pending storage. */
   const createUserTextNode = function createUserTextNode(React, t) {
     const { useRef, useState, useLayoutEffect } = React;
     const h = React.createElement;
@@ -1051,14 +1015,10 @@
 }
 `;
 
-  /** Services the browser half needs; without any of them the plugin stays inactive. */
+  /** Required services prevent partial activation without composer and renderer ownership. */
   const inject = ['slots', 'sessions', 'conversation', 'locale', 'uiConversation'];
 
-  /**
-   * Register dictionaries, the sent-text rule and renderer, the card dock, and
-   * the selection overlay.
-   * @param ctx - client root context.
-   */
+  /** Context-owned registrations let plugin disposal release each contributed surface. */
   const applyPlugin = function applyPlugin(ctx, React) {
     const t = ctx.locale.bind(NS);
     const conversationT = ctx.locale.bind('conversation');
