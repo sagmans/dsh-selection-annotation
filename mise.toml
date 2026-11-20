@@ -1,0 +1,7 @@
+# Development tools for the repository's native validation gate.
+# Run through mise (`mise exec -- …`) so every checkout uses the same releases.
+[tools]
+deno = "2.9.8"
+node = "24.22.3"
+shellcheck = "0.11.0"
+shfmt = "3.14.1"

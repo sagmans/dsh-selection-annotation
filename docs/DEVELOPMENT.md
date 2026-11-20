@@ -32,9 +32,10 @@ parity, privacy patterns, distribution, and module registration. Smoke mode runs
 the same gate with its mode label. Staged mode reads the selected index, not
 unstaged edits. Use the full gate to assess the working tree.
 
-The gate requires Node.js, Deno, and shfmt. It neither installs packages nor
-rewrites source. Semantic JavaScript type checks require application runtime
-declarations and are outside this gate.
+The gate requires Node.js, Deno, shfmt, and shellcheck at the versions pinned
+in [mise.toml](../mise.toml), failing closed when a tool is missing or below its
+floor. It neither installs packages nor rewrites source. Semantic JavaScript
+type checks require application runtime declarations and are outside this gate.
 
 ## Hooks
 
